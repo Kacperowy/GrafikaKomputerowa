@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>WebGL Interactive Particles</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #1a1a2e;
+    }
+    canvas {
+        display: block;
+    }
+</style>
+
+<script type="x-shader/x-vertex" id="vertex-shader-code">
+    attribute vec2 a_position;
+    attribute vec3 a_vertexColor;
+    uniform float u_canvasWidth;
+    uniform float u_canvasHeight;
+    varying vec3 v_fragmentColor;
+    
+    void main() {
+        // Mapowanie współrzędnych pikselowych do przestrzeni NDC [-1, 1]
+        float ndcX = a_position.x / u_canvasWidth * 2.0 - 1.0;
+        float ndcY = 1.0 - a_position.y / u_canvasHeight * 2.0;
+        
+        gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
+        gl_PointSize = 64.0;
+        v_fragmentColor = a_vertexColor;
+    }
+</script>
+
+<script type="x-shader/x-fragment" id="fragment-shader-code">
+    #ifdef GL_FRAGMENT_PRECISION_HIGH
+       precision highp float;
+    #else
+       precision mediump float;
+    #endif
+    
+    varying vec3 v_fragmentColor;
+    uniform int u_renderStyle;
+    
+    void main() {
+        vec2 localCoord = gl_PointCoord - vec2(0.5);
+        
+        if (u_renderStyle == 0) {
+            // Wariant 0: Kwadrat
+            gl_FragColor = vec4(v_fragmentColor, 1.0);
+        } else if (u_renderStyle == 1) {
+            // Wariant 1: Koło
+            if (length(localCoord) > 0.5) discard;
+            gl_FragColor = vec4(v_fragmentColor, 1.0);
+        } else if (u_renderStyle == 2) {
+            // Wariant 2: Romb
+            if (abs(localCoord.x) + abs(localCoord.y) > 0.5) discard;
+            gl_FragColor = vec4(v_fragmentColor, 1.0);
+        } else {
+            // Wariant 3: Romb z zanikaniem krawędziowym
+            float distanceSum = abs(localCoord.x) + abs(localCoord.y);
+            if (distanceSum > 0.5) discard;
+            float alphaFade = 1.0 - distanceSum / 0.5;
+            gl_FragColor = vec4(v_fragmentColor, alphaFade);
+        }
+    }
+</script>
+
+<script>
+
+"use strict";
+
+let glCanvas;
+let glContext;
+
+
+let uWidthLocation, uHeightLocation, uStyleLocation;
+let aPositionLocation, aColorLocation;
+
+
+let positionBuffer, colorBuffer;
+
+// Parametry symulacji
+const TOTAL_POINTS = 30;
+const PARTICLE_SIZE = 64;
+
+const particlePositions = new Float32Array(2 * TOTAL_POINTS);
+const particleVelocities = new Float32Array(2 * TOTAL_POINTS);
+const particleColors = new Float32Array(3 * TOTAL_POINTS);
+
+let animationActive = true;
+let enableVertexColors = true;
+let activeStyleMode = 0;
+
+function drawActiveScene() {
+    glContext.clear(glContext.COLOR_BUFFER_BIT);
+
+
+    glContext.bindBuffer(glContext.ARRAY_BUFFER, positionBuffer);
+    glContext.bufferData(glContext.ARRAY_BUFFER, particlePositions, glContext.STREAM_DRAW);
+    glContext.vertexAttribPointer(aPositionLocation, 2, glContext.FLOAT, false, 0, 0);
+
+    glContext.uniform1i(uStyleLocation, activeStyleMode);
+    glContext.drawArrays(glContext.POINTS, 0, TOTAL_POINTS);
+}
+
+function initializeParticles() {
+    for (let i = 0; i < TOTAL_POINTS; i++) {
+        particlePositions[2 * i] = glCanvas.width / 2;
+        particlePositions[2 * i + 1] = glCanvas.height / 2;
+        
+        const currentSpeed = 2 + 4 * Math.random();
+        const movementAngle = 2 * Math.PI * Math.random();
+        
+        particleVelocities[2 * i] = currentSpeed * Math.sin(movementAngle);
+        particleVelocities[2 * i + 1] = currentSpeed * Math.cos(movementAngle);
+    }
+}
+
+function recalculatePhysics() {
+    for (let i = 0; i < TOTAL_POINTS; i++) {
+        // Oś X
+        particlePositions[2 * i] += particleVelocities[2 * i];
+        if (particlePositions[2 * i] < PARTICLE_SIZE / 2 && particleVelocities[2 * i] < 0) {
+            particlePositions[2 * i] += 2 * (PARTICLE_SIZE / 2 - particlePositions[2 * i]);
+            particleVelocities[2 * i] = Math.abs(particleVelocities[2 * i]);
+        } else if (particlePositions[2 * i] > glCanvas.width - PARTICLE_SIZE / 2 && particleVelocities[2 * i] > 0) {
+            particlePositions[2 * i] -= 2 * (particlePositions[2 * i] - glCanvas.width + PARTICLE_SIZE / 2);
+            particleVelocities[2 * i] = -Math.abs(particleVelocities[2 * i]);
+        }
+
+        // Oś Y
+        particlePositions[2 * i + 1] += particleVelocities[2 * i + 1];
+        if (particlePositions[2 * i + 1] < PARTICLE_SIZE / 2 && particleVelocities[2 * i + 1] < 0) {
+            particlePositions[2 * i + 1] += 2 * (PARTICLE_SIZE / 2 - particlePositions[2 * i + 1]);
+            particleVelocities[2 * i + 1] = Math.abs(particleVelocities[2 * i + 1]);
+        } else if (particlePositions[2 * i + 1] > glCanvas.height - PARTICLE_SIZE / 2 && particleVelocities[2 * i + 1] > 0) {
+            particlePositions[2 * i + 1] -= 2 * (particlePositions[2 * i + 1] - glCanvas.height + PARTICLE_SIZE / 2);
+            particleVelocities[2 * i + 1] = -Math.abs(particleVelocities[2 * i + 1]);
+        }
+    }
+}
+
+function handleKeyboardInput(event) {
+    const pressedKey = event.keyCode;
+
+    if (pressedKey === 32) { // SPACJA
+        animationActive = !animationActive;
+        if (animationActive) {
+            requestAnimationFrame(processAnimationFrame);
+        }
+    } else if (pressedKey === 67) { // Klawisz 'C'
+        enableVertexColors = !enableVertexColors;
+        if (enableVertexColors) {
+            glContext.bindBuffer(glContext.ARRAY_BUFFER, colorBuffer);
+            glContext.enableVertexAttribArray(aColorLocation);
+            glContext.vertexAttribPointer(aColorLocation, 3, glContext.FLOAT, false, 0, 0);
+        } else {
+            glContext.disableVertexAttribArray(aColorLocation);
+            glContext.vertexAttrib3f(aColorLocation, 1.0, 0.0, 0.0); // Statyczna czerwień
+        }
+    } else if (pressedKey === 49) { activeStyleMode = 0; // '1'
+    } else if (pressedKey === 50) { activeStyleMode = 1; // '2'
+    } else if (pressedKey === 51) { activeStyleMode = 2; // '3'
+    } else if (pressedKey === 52) { activeStyleMode = 3; // '4'
+    }
+}
+
+function setupWebGLConfiguration() {
+    const glProgram = compileAndLinkProgram(glContext, "vertex-shader-code", "fragment-shader-code", "a_position");
+    glContext.useProgram(glProgram);
+
+    uWidthLocation = glContext.getUniformLocation(glProgram, "u_canvasWidth");
+    uHeightLocation = glContext.getUniformLocation(glProgram, "u_canvasHeight");
+    uStyleLocation = glContext.getUniformLocation(glProgram, "u_renderStyle");
+    aPositionLocation = glContext.getAttribLocation(glProgram, "a_position");
+    aColorLocation = glContext.getAttribLocation(glProgram, "a_vertexColor");
+
+    glContext.uniform1f(uWidthLocation, glCanvas.width);
+    glContext.uniform1f(uHeightLocation, glCanvas.height);
+    glContext.uniform1i(uStyleLocation, activeStyleMode);
+
+    positionBuffer = glContext.createBuffer();
+    glContext.enableVertexAttribArray(aPositionLocation);
+
+
+    for (let i = 0; i < 3 * TOTAL_POINTS; i++) {
+        particleColors[i] = Math.random();
+    }
+    
+    colorBuffer = glContext.createBuffer();
+    glContext.bindBuffer(glContext.ARRAY_BUFFER, colorBuffer);
+    glContext.bufferData(glContext.ARRAY_BUFFER, particleColors, glContext.STATIC_DRAW);
+    glContext.enableVertexAttribArray(aColorLocation);
+    glContext.vertexAttribPointer(aColorLocation, 3, glContext.FLOAT, false, 0, 0);
+
+
+    glContext.enable(glContext.BLEND);
+    glContext.blendFunc(glContext.SRC_ALPHA, glContext.ONE_MINUS_SRC_ALPHA);
+    glContext.clearColor(0, 0, 0, 1);
+}
+
+function compileAndLinkProgram(gl, vertexId, fragmentId, bindAttributeZero) {
+    const fetchSource = (elementId) => {
+        const element = document.getElementById(elementId);
+        let node = element.firstChild;
+        let accumulator = "";
+        while (node) {
+            if (node.nodeType === 3) accumulator += node.textContent;
+            node = node.nextSibling;
+        }
+        return accumulator;
+    };
+
+    let vertexSource, fragmentSource;
+    try {
+        vertexSource = fetchSource(vertexId);
+        fragmentSource = fetchSource(fragmentId);
+    } catch (err) {
+        throw "Nie można pobrać kodów źródłowych shaderów.";
+    }
+
+    const vShader = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vShader, vertexSource);
+    gl.compileShader(vShader);
+    if (!gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) {
+        throw "Błąd kompilacji Vertex Shadera: " + gl.getShaderInfoLog(vShader);
+    }
+
+    const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fShader, fragmentSource);
+    gl.compileShader(fShader);
+    if (!gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) {
+        throw "Błąd kompilacji Fragment Shadera: " + gl.getShaderInfoLog(fShader);
+    }
+
+    const programObject = gl.createProgram();
+    gl.attachShader(programObject, vShader);
+    gl.attachShader(programObject, fShader);
+    
+    if (bindAttributeZero) {
+        gl.bindAttribLocation(programObject, 0, bindAttributeZero);
+    }
+    
+    gl.linkProgram(programObject);
+    if (!gl.getProgramParameter(programObject, gl.LINK_STATUS)) {
+        throw "Błąd konsolidacji (linkowania) programu: " + gl.getProgramInfoLog(programObject);
+    }
+    
+    return programObject;
+}
+
+function processAnimationFrame() {
+    if (animationActive) {
+        recalculatePhysics();
+        drawActiveScene();
+        requestAnimationFrame(processAnimationFrame);
+    }
+}
+
+function handleResizeEvent() {
+    glCanvas.width = window.innerWidth;
+    glCanvas.height = window.innerHeight;
+    glContext.viewport(0, 0, glCanvas.width, glCanvas.height);
+    glContext.uniform1f(uWidthLocation, glCanvas.width);
+    glContext.uniform1f(uHeightLocation, glCanvas.height);
+    if (!animationActive) {
+        drawActiveScene();
+    }
+}
+
+function handleMouseInteraction(event) {
+    const redirectVectors = (targetX, targetY) => {
+        for (let i = 0; i < TOTAL_POINTS; i++) {
+            const deltaX = targetX - particlePositions[2 * i];
+            const deltaY = targetY - particlePositions[2 * i + 1];
+            const directDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            
+            if (directDistance > 0.1) {
+                const scalarVelocity = Math.sqrt(
+                    particleVelocities[2 * i] * particleVelocities[2 * i] +
+                    particleVelocities[2 * i + 1] * particleVelocities[2 * i + 1]
+                );
+                particleVelocities[2 * i] = deltaX / directDistance * scalarVelocity;
+                particleVelocities[2 * i + 1] = deltaY / directDistance * scalarVelocity;
+            }
+        }
+    };
+
+    const mouseMoveCallback = (e) => redirectVectors(e.clientX, e.clientY);
+    const mouseUpCallback = () => {
+        glCanvas.removeEventListener("mousemove", mouseMoveCallback, false);
+        document.removeEventListener("mouseup", mouseUpCallback, false);
+    };
+
+    if (event.which !== 1) return; // Reakcja tylko na LPM
+    if (event.shiftKey) {
+        initializeParticles();
+        return;
+    }
+    
+    redirectVectors(event.clientX, event.clientY);
+    glCanvas.addEventListener("mousemove", mouseMoveCallback);
+    document.addEventListener("mouseup", mouseUpCallback);
+}
+
+function startPipeline() {
+    try {
+        glCanvas = document.createElement("canvas");
+        glCanvas.width = window.innerWidth;
+        glCanvas.height = window.innerHeight;
+        glContext = glCanvas.getContext("webgl", { alpha: false, depth: false, stencil: false });
+        if (!glContext) throw "Urządzenie/przeglądarka nie obsługuje kontekstu WebGL.";
+    } catch (error) {
+        document.body.innerHTML = "<p>Błąd pobierania kontekstu WebGL: " + error + "</p>";
+        return;
+    }
+    
+    try {
+        initializeParticles();
+        setupWebGLConfiguration();
+    } catch (error) {
+        document.body.innerHTML = "<pre>Błąd krytyczny inicjalizacji potoku: \n\n" + error + "</pre>";
+        return;
+    }
+    
+    document.body.appendChild(glCanvas);
+    window.addEventListener("resize", handleResizeEvent);
+    glCanvas.addEventListener("mousedown", handleMouseInteraction);
+    document.addEventListener("keydown", handleKeyboardInput);
+    requestAnimationFrame(processAnimationFrame);
+}
+
+</script>
+</head>
+<body onload="startPipeline()">
+<noscript>Do uruchomienia tej aplikacji wymagany jest aktywny skrypt JavaScript.</noscript>
+</body>
+</html>
