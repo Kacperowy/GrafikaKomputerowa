@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Three.js - Wieża Szachowa (Wariant 8)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #1a1a2e;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // Render
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // Scena
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+    scene.fog = new THREE.Fog(0x1a1a2e, 18, 40);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(5, 4, 7);
+    camera.lookAt(0, 2, 0);
+
+    // Kontrolki
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 2, 0);
+    controls.minDistance = 2;
+    controls.maxDistance = 20;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.update();
+
+    // Światło
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambient);
+
+    const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    sun.position.set(6, 10, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 40;
+    sun.shadow.camera.left = -6;
+    sun.shadow.camera.right = 6;
+    sun.shadow.camera.top = 10;
+    sun.shadow.camera.bottom = -2;
+    scene.add(sun);
+
+    const fill = new THREE.DirectionalLight(0x8090ff, 0.6);
+    fill.position.set(-5, 3, -4);
+    scene.add(fill);
+
+    // Podłoga
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(4, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0d0d1a, roughness: 0.9, metalness: 0.1 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Materiał dla białej figury (gładki plastik/ceramika)
+    const whiteMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.35,
+      metalness: 0.05,
+    });
+
+    // Profile points dla WIEŻY (Rook)
+    const profilePoints = [
+      new THREE.Vector2(0.00, 0.00),  // Środek spodu podstawy
+      new THREE.Vector2(1.10, 0.00),  // Dolna krawędź szerokiej bazy
+      new THREE.Vector2(1.10, 0.15),  // Pierwszy stopień podstawy w górę
+      new THREE.Vector2(0.95, 0.30),  // Ścięcie/zaokrąglenie podstawy
+      new THREE.Vector2(0.85, 0.45),  // Pierścień dolny wieży
+      new THREE.Vector2(0.55, 0.75),  // Przewężenie nad bazą (początek kolumny)
+      new THREE.Vector2(0.50, 1.60),  // Talia wieży (środek)
+      new THREE.Vector2(0.53, 2.50),  // Góra kolumny
+      new THREE.Vector2(0.75, 2.80),  // Rozszerzenie pod koroną
+      new THREE.Vector2(0.85, 3.00),  // Dolny kant korony wieży
+      new THREE.Vector2(0.85, 3.50),  // Górny zewnętrzny kant korony
+      new THREE.Vector2(0.70, 3.50),  // Grubość ścianki korony (wcięcie do środka)
+      new THREE.Vector2(0.70, 3.15),  // Dno wewnętrznego wgłębienia korony
+      new THREE.Vector2(0.00, 3.15)   // Środek wnętrza wieży
+    ];
+
+    // Korpus główny Wieży wytoczony z profilu
+    const latheGeo = new THREE.LatheGeometry(profilePoints, 64);
+    const latheMesh = new THREE.Mesh(latheGeo, whiteMat);
+    latheMesh.castShadow = true;
+    latheMesh.receiveShadow = true;
+    scene.add(latheMesh);
+
+    // Generowanie 6 zębów korony wieży (Crenellations)
+    const toothGeo = new THREE.BoxGeometry(0.2, 0.25, 0.25);
+    const numTeeth = 6;
+    const crownRadius = 0.77;
+    const crownHeight = 3.5 + 0.125; // Połowa wysokości ząbka ponad płaszczyznę 3.5
+
+    for (let i = 0; i < numTeeth; i++) {
+      const angle = (i / numTeeth) * Math.PI * 2;
+      const toothMesh = new THREE.Mesh(toothGeo, whiteMat);
+      
+      toothMesh.position.set(
+        Math.cos(angle) * crownRadius,
+        crownHeight,
+        Math.sin(angle) * crownRadius
+      );
+      
+      toothMesh.rotation.y = -angle; // Obrócenie ząbków przodem do środka
+      toothMesh.castShadow = true;
+      toothMesh.receiveShadow = true;
+      scene.add(toothMesh);
+    }
+
+    // Dopasowanie do okna
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Pętla animacji
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+
+</html>
